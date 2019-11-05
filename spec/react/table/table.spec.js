@@ -3,7 +3,6 @@ import ReactDOM from 'react-dom';
 import {
   Caption,
   Table,
-  TableSelectable,
   Tbody,
   Td,
   Th,
@@ -13,7 +12,9 @@ import {
   TrHeaderForDrawers,
   TrWithDrawer,
   TrWithoutDrawer,
-  SelectionContext, TrForBody
+  SelectionContext,
+  SelectableContextWrapper,
+  TrForBody
 } from '../../../src/react/table';
 
 describe('Table', () => {
@@ -26,6 +27,62 @@ describe('Table', () => {
   it('passes through classnames', () => {
     ReactDOM.render(<Table className="my-table"/>, root);
     expect('table').toHaveClass('my-table');
+  });
+
+  describe('when in a selectable context', () => {
+    it('clips the selection when some of the identifiers are deleted', () => {
+      const onSelectionChange = jest.fn();
+      ReactDOM.render(
+          <SelectableContextWrapper identifiers={['GH', 'MH', 'AT']} onSelectionChange={onSelectionChange}>
+            <Table>
+              <Thead>
+                <TrHeader/>
+              </Thead>
+            </Table>
+          </SelectableContextWrapper>, root);
+
+      document.querySelector('thead input').click();
+      expect(onSelectionChange).toHaveBeenNthCalledWith(1, {'GH': true, 'MH': true, 'AT':true });
+
+      ReactDOM.render(
+          <SelectableContextWrapper identifiers={['GH', 'MH']} onSelectionChange={onSelectionChange}>
+            <Table>
+              <Thead>
+                <TrHeader/>
+              </Thead>
+            </Table>
+          </SelectableContextWrapper>, root);
+
+      expect(onSelectionChange).toHaveBeenNthCalledWith(2, {'GH': true, 'MH': true});
+    });
+
+    it('preserves the selection when new identifiers are added', () => {
+      const onSelectionChange = jest.fn();
+
+      ReactDOM.render(
+          <SelectableContextWrapper identifiers={['GH']} onSelectionChange={onSelectionChange}>
+            <Table>
+              <Thead>
+                <TrHeader/>
+              </Thead>
+            </Table>
+          </SelectableContextWrapper>, root);
+
+      document.querySelector('thead input').click();
+      expect(onSelectionChange).toHaveBeenNthCalledWith(1, {'GH': true});
+
+      ReactDOM.render(
+          <SelectableContextWrapper identifiers={['GH', 'MH', 'AT']} onSelectionChange={onSelectionChange}>
+            <Table>
+              <Thead>
+                <TrHeader/>
+              </Thead>
+            </Table>
+          </SelectableContextWrapper>, root);
+
+      expect(onSelectionChange).toHaveBeenCalledTimes(1);
+    });
+
   });
 });
 
@@ -48,76 +105,100 @@ describe('Th', () => {
   });
 });
 
-describe('TableSelectable', () => {
-  it('renders a table', () => {
-    ReactDOM.render(<TableSelectable identifiers={[]} onSelectionChange={() => {}}/>, root);
-    expect('table').toExist();
-    expect('table').toHaveClass('pui-table');
+describe('SelectionContext', () => {
+  let contextValue;
+  let onSelectionChange;
+
+  beforeEach(() => {
+    contextValue = 'fakeContext';
+    onSelectionChange = jest.fn();
+
+    ReactDOM.render(
+        <SelectableContextWrapper identifiers={['MH', 'AT']} onSelectionChange={onSelectionChange}>
+          <SelectionContext.Consumer>
+            {value => { contextValue = value; }}
+          </SelectionContext.Consumer>
+        </SelectableContextWrapper>, root);
   });
 
   it('creates a selection context', () => {
-    let contextValue = 'fakeContext';
-
-    ReactDOM.render(<TableSelectable identifiers={[]} onSelectionChange={() => {}}>
-      <SelectionContext.Consumer>
-        {value => { contextValue = value; }}
-      </SelectionContext.Consumer>
-    </TableSelectable>, root);
-
-    expect(contextValue.isSelectableTable).toBeTruthy();
+    expect(contextValue.isInSelection).toBeTruthy();
   });
 
-  describe('onSelectionChange', () => {
-    const onSelectionChangeSpy = jest.fn();
+  it('can select one', () => {
+    expect(contextValue.isSelected('MH')).toBeFalsy();
+    expect(contextValue.isSelected('AT')).toBeFalsy();
+    expect(contextValue.allAreSelected()).toBeFalsy();
+    expect(contextValue.someAreSelected()).toBeFalsy();
 
-    beforeEach(() => {
-      ReactDOM.render(
-          <TableSelectable identifiers={['GH', 'MH', 'AT']} onSelectionChange={onSelectionChangeSpy}>
-            <Thead>
-              <TrHeader>
-                <Td>Name</Td>
-                <Td>Surname</Td>
-              </TrHeader>
-            </Thead>
-            <Tbody>
-              <TrForBody identifier={'MH'}>
-                <Td>Margaret</Td>
-                <Td>Hamilton</Td>
-              </TrForBody>
-              <TrForBody identifier={'GH'}>
-                <Td>Grace</Td>
-                <Td>Hopper</Td>
-              </TrForBody>
-              <TrForBody identifier={'AT'}>
-                <Td>Alan</Td>
-                <Td>Turing</Td>
-              </TrForBody>
-            </Tbody>
-          </TableSelectable>, root);
-    });
+    contextValue.toggleSelected('MH');
 
-    it('is called with the appropriate identifiers when selecting individual rows ', () => {
-      let checkboxes = document.querySelectorAll('tbody input');
+    expect(contextValue.isSelected('MH')).toBeTruthy();
+    expect(contextValue.isSelected('AT')).toBeFalsy();
+    expect(contextValue.allAreSelected()).toBeFalsy();
+    expect(contextValue.someAreSelected()).toBeTruthy();
+  });
 
-      checkboxes[0].click();
-      expect(onSelectionChangeSpy).toHaveBeenCalledWith({'MH': true});
+  it('can deselect one', () => {
+    contextValue.toggleSelected('MH');
+    contextValue.toggleSelected('MH');
+    expect(contextValue.isSelected('MH')).toBeFalsy();
+  });
 
-      checkboxes[1].click();
-      expect(onSelectionChangeSpy).toHaveBeenCalledWith({'MH': true, 'GH': true});
+  it('can select all', () => {
+    contextValue.toggleSelectAll();
+    expect(contextValue.isSelected('MH')).toBeTruthy();
+    expect(contextValue.isSelected('AT')).toBeTruthy();
+  });
 
-      checkboxes[0].click();
-      expect(onSelectionChangeSpy).toHaveBeenCalledWith({'GH': true});
-    });
+  it('can deselect all', () => {
+    contextValue.toggleSelectAll();
+    contextValue.toggleSelectAll();
+    expect(contextValue.isSelected('MH')).toBeFalsy();
+    expect(contextValue.isSelected('AT')).toBeFalsy();
+  });
 
-    it('is called with all identifiers when selecting all', () => {
-      let selectAll = document.querySelector('thead input');
+  it('clips the selection when some of the identifiers are deleted', () => {
+    contextValue.toggleSelectAll();
 
-      selectAll.click();
-      expect(onSelectionChangeSpy).toHaveBeenCalledWith({'MH': true, 'GH': true, 'AT': true});
+    const secondRenderIdentifiers = ['MH'];
+    ReactDOM.render(
+        <SelectableContextWrapper identifiers={secondRenderIdentifiers} onSelectionChange={() => {}}>
+          <SelectionContext.Consumer>
+            {value => { contextValue = value; }}
+          </SelectionContext.Consumer>
+        </SelectableContextWrapper>, root);
 
-      selectAll.click();
-      expect(onSelectionChangeSpy).toHaveBeenCalledWith({});
-    });
+    expect(contextValue.isSelected('MH')).toBeTruthy();
+    expect(contextValue.isSelected('AT')).toBeFalsy();
+    expect(contextValue.allAreSelected()).toBeTruthy();
+  });
+
+  it('preserves the selection when new identifiers are added', () => {
+    contextValue.toggleSelectAll();
+
+    const secondRenderIdentifiers = ['MH', 'AT', 'AR'];
+    ReactDOM.render(
+        <SelectableContextWrapper identifiers={secondRenderIdentifiers} onSelectionChange={() => {}}>
+          <SelectionContext.Consumer>
+            {value => { contextValue = value; }}
+          </SelectionContext.Consumer>
+        </SelectableContextWrapper>, root);
+
+    expect(contextValue.isSelected('MH')).toBeTruthy();
+    expect(contextValue.isSelected('AT')).toBeTruthy();
+    expect(contextValue.isSelected('AR')).toBeFalsy();
+    expect(contextValue.allAreSelected()).toBeFalsy();
+    expect(contextValue.someAreSelected()).toBeTruthy();
+  });
+
+  it('deselectAll clears the selection', () => {
+    contextValue.toggleSelected('MH');
+    contextValue.deselectAll();
+
+    expect(contextValue.isSelected('MH')).toBeFalsy();
+    expect(contextValue.isSelected('AT')).toBeFalsy();
+    expect(onSelectionChange).toHaveBeenCalledWith({});
   });
 });
 
@@ -160,14 +241,21 @@ describe('TrHeaderForDrawers', () => {
     });
   });
 
-  describe('in a selectable Table', ()=>{
+  describe('when in a selectable context', ()=>{
     it('renders a table header that sets the column ' +
         'to the proper width for collapsible toggles and selectOne checkboxes',
         () => {
-          ReactDOM.render(<TableSelectable identifiers={[]} onSelectionChange={() => {}}><Thead><TrHeaderForDrawers>
-            <Th>Content header 1</Th>
-            <Th>Content header 2</Th>
-          </TrHeaderForDrawers></Thead></TableSelectable>, root);
+          ReactDOM.render(
+              <SelectableContextWrapper identifiers={[]} onSelectionChange={() => {}}>
+                <Table>
+                  <Thead>
+                    <TrHeaderForDrawers>
+                      <Th>Content header 1</Th>
+                      <Th>Content header 2</Th>
+                    </TrHeaderForDrawers>
+                  </Thead>
+                </Table>
+              </SelectableContextWrapper>, root);
 
           expect(document.querySelectorAll('th')[0]).toHaveClass('pui-table--selectable-toggle');
           expect(document.querySelectorAll('th')[1]).toHaveClass('pui-table--collapsible-toggle');
@@ -175,7 +263,6 @@ describe('TrHeaderForDrawers', () => {
     );
   });
 });
-
 
 describe('TrWithoutDrawer', () => {
   beforeEach(() => {
@@ -192,8 +279,7 @@ describe('TrWithoutDrawer', () => {
   it('renders an empty table data that sets the column to the proper width for collapsible toggles', () => {
         expect(document.querySelectorAll('td')[0]).toHaveText('');
         expect(document.querySelectorAll('td')[0]).toHaveClass('pui-table--collapsible-toggle');
-      }
-  );
+  });
 
   it('renders table data cells given as children after the table data spacer cell', () => {
     const tds = document.querySelectorAll('td');
@@ -202,16 +288,20 @@ describe('TrWithoutDrawer', () => {
     expect(tds[2]).toHaveText('Content cell 2');
   });
 
-  describe('when in a selectable table', () => {
+  describe('when in a selectable context', () => {
     it('sets the column to the proper width for collapsible toggles', () => {
-      ReactDOM.render(<TableSelectable identifiers={[]} onSelectionChange={() => {}}>
-        <Tbody>
-          <TrWithoutDrawer>
-            <Td>Content cell 1</Td>
-            <Td>Content cell 2</Td>
-          </TrWithoutDrawer>
-        </Tbody>
-      </TableSelectable>, root);
+      ReactDOM.render(
+          <SelectableContextWrapper identifiers={[]} onSelectionChange={() => {
+          }}>
+            <Table>
+              <Tbody>
+                <TrWithoutDrawer>
+                  <Td>Content cell 1</Td>
+                  <Td>Content cell 2</Td>
+                </TrWithoutDrawer>
+              </Tbody>
+            </Table>
+          </SelectableContextWrapper>, root);
 
       expect(document.querySelectorAll('td')[1]).toHaveText('');
       expect(document.querySelectorAll('td')[1]).toHaveClass('pui-table--collapsible-toggle');
@@ -270,14 +360,25 @@ describe('TrWithDrawer', () => {
     expect(drawerTds[0].querySelector('.pui-collapsible i')).toHaveText('Drawer content');
   });
 
-  describe('when in a selectable table', () => {
+  describe('when in a selectable context', () => {
     beforeEach(() => {
-      ReactDOM.render(<TableSelectable identifiers={[]} onSelectionChange={() => {}}><Tbody>
-        <TrWithDrawer {...{ariaLabelCollapsed, ariaLabelExpanded, drawerContent, className, onExpand: onExpandSpy}}>
-          <Td>Content cell 1</Td>
-          <Td>Content cell 2</Td>
-        </TrWithDrawer>
-      </Tbody></TableSelectable>, root);
+      ReactDOM.render(
+          <SelectableContextWrapper identifiers={[]} onSelectionChange={() => {}}>
+            <Table>
+              <Tbody>
+                <TrWithDrawer {...{
+                  ariaLabelCollapsed,
+                  ariaLabelExpanded,
+                  drawerContent,
+                  className,
+                  onExpand: onExpandSpy
+                }}>
+                  <Td>Content cell 1</Td>
+                  <Td>Content cell 2</Td>
+                </TrWithDrawer>
+              </Tbody>
+            </Table>
+          </SelectableContextWrapper>, root);
     });
 
     it('extends the drawer across the whole width of the table', () => {
@@ -383,10 +484,10 @@ describe.each([
     ['TrHeader', TrHeader],
     ['TrHeaderForDrawers', TrHeaderForDrawers]
 ])
-('Contract for selectable header: %s',
+('Contract for header of type "%s" in a selectable context',
     (_, HeaderComponent) => {
       const contextValue = {
-        isSelectableTable: true,
+        isInSelection: true,
         allAreSelected: () => false,
         someAreSelected: () => false,
         toggleSelectAll: () => {
@@ -394,13 +495,15 @@ describe.each([
       };
 
       const selectableTable = (HeaderComponent) => (
-          <TableSelectable identifiers={[]} onSelectionChange={() => {}}>
-            <SelectionContext.Provider value={contextValue}>
-              <Thead>
-                <HeaderComponent/>
-              </Thead>
-            </SelectionContext.Provider>
-          </TableSelectable>);
+          <SelectableContextWrapper identifiers={[]} onSelectionChange={() => {}}>
+            <Table>
+              <SelectionContext.Provider value={contextValue}>
+                <Thead>
+                  <HeaderComponent/>
+                </Thead>
+              </SelectionContext.Provider>
+            </Table>
+          </SelectableContextWrapper>);
 
       it('calls the context handler when clicked', () => {
         contextValue.toggleSelectAll = jest.fn();
@@ -437,10 +540,13 @@ describe.each([
 
       describe('with select all (default)', () => {
         beforeEach(() => {
-          ReactDOM.render(<TableSelectable identifiers={[]} onSelectionChange={() => {}}><Thead><HeaderComponent>
-            <Th>Content header 1</Th>
-            <Th>Content header 2</Th>
-          </HeaderComponent></Thead></TableSelectable>, root);
+          ReactDOM.render(
+              <SelectableContextWrapper identifiers={[]} onSelectionChange={() => {}}>
+                <Table><Thead><HeaderComponent>
+                  <Th>Content header 1</Th>
+                  <Th>Content header 2</Th>
+                </HeaderComponent></Thead></Table>
+              </SelectableContextWrapper>, root);
         });
 
         it(
@@ -456,10 +562,13 @@ describe.each([
 
       describe('withoutSelectAll', () => {
         beforeEach(() => {
-          ReactDOM.render(<TableSelectable identifiers={[]} onSelectionChange={() => {}}><Thead><HeaderComponent withoutSelectAll>
-            <Th>Content header 1</Th>
-            <Th>Content header 2</Th>
-          </HeaderComponent></Thead></TableSelectable>, root);
+          ReactDOM.render(
+              <SelectableContextWrapper identifiers={[]} onSelectionChange={() => {}}>
+                <Table><Thead><HeaderComponent withoutSelectAll>
+                  <Th>Content header 1</Th>
+                  <Th>Content header 2</Th>
+                </HeaderComponent></Thead></Table>
+              </SelectableContextWrapper>, root);
         });
 
         it(
@@ -479,29 +588,31 @@ describe.each([
   ['TrWithDrawer', TrWithDrawer, {ariaLabelExpanded: '', ariaLabelCollapsed: ''}],
   ['TrWithoutDrawer', TrWithoutDrawer, {}]
 ])
-('Contract for body table row: %s', (_, TrComponentUnderTest, props)=>{
-  describe('when in a selectable table', ()=> {
+('Contract for body table row of type "%s" in a selectable context', (_, TrComponentUnderTest, props)=>{
+  describe('when in a selectable context', ()=> {
     const contextValue = {
-      isSelectableTable: true,
+      isInSelection: true,
       toggleSelected: jest.fn(),
       isSelected: ()=>false,
     };
 
     const selectableTable = () => (
-        <TableSelectable identifiers={[]} onSelectionChange={() => {}}>
-          <SelectionContext.Provider value={contextValue}>
-            <Tbody>
-              <TrComponentUnderTest {...props} identifier={'first row'}>
-                <Td>Content cell 1</Td>
-                <Td>Content cell 2</Td>
-              </TrComponentUnderTest>
-              <TrComponentUnderTest {...props} identifier={'second row'}>
-                <Td>Content cell 11</Td>
-                <Td>Content cell 22</Td>
-              </TrComponentUnderTest>
-            </Tbody>
-          </SelectionContext.Provider>
-        </TableSelectable>);
+        <SelectableContextWrapper identifiers={[]} onSelectionChange={() => {}}>
+          <Table>
+            <SelectionContext.Provider value={contextValue}>
+              <Tbody>
+                <TrComponentUnderTest {...props} identifier={'first row'}>
+                  <Td>Content cell 1</Td>
+                  <Td>Content cell 2</Td>
+                </TrComponentUnderTest>
+                <TrComponentUnderTest {...props} identifier={'second row'}>
+                  <Td>Content cell 11</Td>
+                  <Td>Content cell 22</Td>
+                </TrComponentUnderTest>
+              </Tbody>
+            </SelectionContext.Provider>
+          </Table>
+        </SelectableContextWrapper>);
 
     describe('when the table row is selectable (default)', ()=> {
       it('prepends a td that will contain a checkbox', ()=>{
@@ -553,14 +664,16 @@ describe.each([
     describe('when the table row is not selectable', ()=> {
       it('renders a blank space where the checkbox would have been', () => {
         ReactDOM.render(
-            <TableSelectable identifiers={[]} onSelectionChange={() => {}}>
+            <SelectableContextWrapper identifiers={[]} onSelectionChange={() => {}}>
+              <Table>
                 <Tbody>
                   <TrComponentUnderTest {...props} notSelectable>
                     <Td>Content cell 1</Td>
                     <Td>Content cell 2</Td>
                   </TrComponentUnderTest>
                 </Tbody>
-            </TableSelectable>, root);
+              </Table>
+            </SelectableContextWrapper>, root);
 
         const tds = document.querySelectorAll('tr:nth-child(1) td');
         const rowLength = tds.length;
@@ -571,5 +684,60 @@ describe.each([
         expect(tds[rowLength-1]).toHaveText('Content cell 2');
       });
     });
+  });
+});
+
+describe('Selectable Table Integration', () => {
+  const onSelectionChangeSpy = jest.fn();
+
+  beforeEach(() => {
+    ReactDOM.render(
+        <SelectableContextWrapper identifiers={['GH', 'MH', 'AT']} onSelectionChange={onSelectionChangeSpy}>
+          <Table>
+            <Thead>
+              <TrHeader>
+                <Td>Name</Td>
+                <Td>Surname</Td>
+              </TrHeader>
+            </Thead>
+            <Tbody>
+              <TrForBody identifier={'MH'}>
+                <Td>Margaret</Td>
+                <Td>Hamilton</Td>
+              </TrForBody>
+              <TrForBody identifier={'GH'}>
+                <Td>Grace</Td>
+                <Td>Hopper</Td>
+              </TrForBody>
+              <TrForBody identifier={'AT'}>
+                <Td>Alan</Td>
+                <Td>Turing</Td>
+              </TrForBody>
+            </Tbody>
+          </Table>
+        </SelectableContextWrapper>, root);
+  });
+
+  it('is called with the appropriate identifiers when selecting individual rows ', () => {
+    let checkboxes = document.querySelectorAll('tbody input');
+
+    checkboxes[0].click();
+    expect(onSelectionChangeSpy).toHaveBeenCalledWith({'MH': true});
+
+    checkboxes[1].click();
+    expect(onSelectionChangeSpy).toHaveBeenCalledWith({'MH': true, 'GH': true});
+
+    checkboxes[0].click();
+    expect(onSelectionChangeSpy).toHaveBeenCalledWith({'GH': true});
+  });
+
+  it('is called with all identifiers when selecting all', () => {
+    let selectAll = document.querySelector('thead input');
+
+    selectAll.click();
+    expect(onSelectionChangeSpy).toHaveBeenCalledWith({'MH': true, 'GH': true, 'AT': true});
+
+    selectAll.click();
+    expect(onSelectionChangeSpy).toHaveBeenCalledWith({});
   });
 });

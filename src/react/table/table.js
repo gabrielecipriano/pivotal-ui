@@ -24,15 +24,16 @@ export const Td = props => <td {...props}/>;
 export const Th = ({scope = 'col', ...props}) => <th {...props} {...{scope}}/>;
 
 export const SelectionContext = React.createContext({
-  isSelectableTable: false,
+  isInSelection: false,
   isSelected: ()=>false,
   toggleSelected: ()=>{},
   allAreSelected: ()=>false,
   someAreSelected: ()=>false,
   toggleSelectAll: ()=>{},
+  deselectAll: ()=>{}
 });
 
-export class TableSelectable extends React.PureComponent {
+export class SelectableContextWrapper extends React.PureComponent {
   static propTypes = {
     onSelectionChange: PropTypes.func.isRequired,
     children: PropTypes.node,
@@ -44,24 +45,54 @@ export class TableSelectable extends React.PureComponent {
     this.state = {
       selection: {},
       selectionContextValue: {
-        isSelectableTable: true,
+        isInSelection: true,
         isSelected: this.isSelected,
         toggleSelected: this.toggleSelected,
 
         allAreSelected: this.allAreSelected,
         someAreSelected: this.someAreSelected,
         toggleSelectAll: this.toggleSelectAll,
+        deselectAll: this.deselectAll,
       }
     };
   }
 
+  componentDidUpdate(prevProps) {
+    if (this.props.identifiers !== prevProps.identifiers) {
+      this._removeDeprecatedSelections();
+    }
+  }
+
   isSelected = (identifier) => this.state.selection[identifier] === true;
   allAreSelected = () => Object.entries(this.state.selection).length === this.props.identifiers.length;
-  noneAreSelected = () => Object.entries(this.state.selection).length === 0;
-  someAreSelected = () => !this.allAreSelected() && !this.noneAreSelected();
+  someAreSelected = () => !this.allAreSelected() && !this._noneAreSelected();
 
   _selectOne = (id, draftState) => draftState[id] = true;
   _deselectOne = (id, draftState) => delete draftState[id];
+  _noneAreSelected = () => Object.entries(this.state.selection).length === 0;
+
+  _forceUpdate(draftSelection) {
+    let forceUpdate = Object.assign({}, this.state.selectionContextValue);
+    this.setState({selection: draftSelection, selectionContextValue: forceUpdate});
+  }
+
+  _removeDeprecatedSelections = () => {
+    const draftSelection = Object.assign({}, this.state.selection);
+
+    let hasChanged = false;
+
+    Object.keys(draftSelection)
+        .filter(id => !this.props.identifiers.includes(id))
+        .forEach(id => {
+          this._deselectOne(id, draftSelection);
+          hasChanged = true;
+        });
+
+    if (hasChanged) {
+      this.props.onSelectionChange(draftSelection);
+      this.setState({selection: draftSelection});
+    }
+  };
 
   toggleSelected = (identifier) => {
     let draftSelection = Object.assign({}, this.state.selection);
@@ -78,21 +109,23 @@ export class TableSelectable extends React.PureComponent {
   toggleSelectAll = () => {
     let draftSelection = {};
 
-    if (this.noneAreSelected()) {
+    if (this._noneAreSelected()) {
       this.props.identifiers.forEach(id => this._selectOne(id, draftSelection));
     }
 
     this.props.onSelectionChange(draftSelection);
-    // update the context value to a clone to cause react to rerender all consumers:
-    let forceUpdate = Object.assign({}, this.state.selectionContextValue);
-    this.setState({selection: draftSelection, selectionContextValue: forceUpdate});
+    this._forceUpdate(draftSelection);
+  };
+
+  deselectAll = () => {
+    this.props.onSelectionChange({});
+    this._forceUpdate({});
   };
 
   render() {
-    const {onSelectionChange, identifiers, ...props} = this.props;
     return (
         <SelectionContext.Provider value={this.state.selectionContextValue}>
-          <Table {...props} />
+          {this.props.children}
         </SelectionContext.Provider>
     );
   }
@@ -103,7 +136,7 @@ export const TrHeader = ({children, withoutSelectAll}) =>
       {
         <SelectionContext.Consumer>
           {context => {
-            if (context.isSelectableTable) {
+            if (context.isInSelection) {
               return (
                   <Th className={classnames('pui-table--selectable-toggle border-right-0')}>
                     {withoutSelectAll ? null :
@@ -142,7 +175,7 @@ export class TrForBody extends React.PureComponent {
       {
         <SelectionContext.Consumer>
           {context => {
-            if (context.isSelectableTable) {
+            if (context.isInSelection) {
               return (
                   <Td className={classnames('border-right-0', {'active-indicator': activated})}>
                     {notSelectable ? null :
@@ -197,7 +230,7 @@ export class TrWithDrawer extends React.PureComponent {
       notSelectable
     } = this.props;
     const {expanded} = this.state;
-    const selectableTable = this.context.isSelectableTable;
+    const selectableTable = this.context.isInSelection;
 
     return (<Fragment>
       <TrForBody className={classnames({'border-bottom': !expanded})}
